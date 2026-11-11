@@ -1,0 +1,1042 @@
+```html
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ular Tangga Online: Truth or Dare & Live Voice</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- PeerJS for WebRTC Audio & Data Sync -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <!-- Canvas Confetti -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Fredoka', sans-serif;
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #311042 100%);
+            min-height: 100vh;
+        }
+        
+        .board-grid {
+            display: grid;
+            grid-template-columns: repeat(10, 1fr);
+            grid-template-rows: repeat(10, 1fr);
+            aspect-ratio: 1 / 1;
+            width: 100%;
+            max-width: 650px;
+            position: relative;
+        }
+
+        .board-cell {
+            position: relative;
+            display: flex;
+            align-items: flex-start;
+            justify-content: flex-start;
+            padding: 2px 4px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            user-select: none;
+        }
+
+        /* Snake & Ladder Canvas overlay */
+        #boardCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        /* Player tokens overlay */
+        .token {
+            position: absolute;
+            z-index: 20;
+            transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+            filter: drop-shadow(0px 4px 6px rgba(0,0,0,0.4));
+        }
+
+        /* Pulse glow animation */
+        @keyframes pulseGlow {
+            0%, 100% { transform: scale(1); filter: drop-shadow(0 0 10px rgba(236,72,153,0.8)); }
+            50% { transform: scale(1.08); filter: drop-shadow(0 0 20px rgba(236,72,153,1)); }
+        }
+        
+        .active-turn {
+            animation: pulseGlow 1.8s infinite;
+        }
+
+        /* 3D Dice style */
+        .dice-box {
+            perspective: 600px;
+        }
+        .dice {
+            width: 60px;
+            height: 60px;
+            position: relative;
+            transform-style: preserve-3d;
+            transition: transform 0.8s cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+        .dice-face {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            border-radius: 12px;
+            border: 2px solid #e2e8f0;
+            background: radial-gradient(circle at 30% 30%, #ffffff, #cbd5e1);
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            padding: 6px;
+            box-shadow: inset 0 0 8px rgba(0,0,0,0.2), 0 6px 12px rgba(0,0,0,0.3);
+        }
+        .dot {
+            width: 10px;
+            height: 10px;
+            background: #0f172a;
+            border-radius: 50%;
+            align-self: center;
+            justify-self: center;
+        }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.6);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #475569;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body class="text-slate-100 flex flex-col min-h-screen">
+
+    <!-- Top Header -->
+    <header class="bg-slate-900/80 backdrop-blur-md border-b border-slate-700/60 sticky top-0 z-50 px-4 py-3">
+        <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center space-x-3">
+                <div class="p-2 bg-gradient-to-tr from-pink-500 to-purple-600 rounded-xl shadow-lg shadow-pink-500/30">
+                    <i class="fa-solid font-bold text-xl fa-dice-d20"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-lg md:text-xl bg-gradient-to-r from-pink-400 via-purple-300 to-indigo-400 bg-clip-text text-transparent">
+                        Ular Tangga Truth or Dare
+                    </h1>
+                    <p class="text-xs text-slate-400">Multiplayer Online & Live Voice Chat</p>
+                </div>
+            </div>
+
+            <!-- Voice Control Bar -->
+            <div id="voiceControls" class="flex items-center gap-3 bg-slate-800/90 border border-slate-700/70 px-4 py-2 rounded-full shadow-inner">
+                <div class="flex items-center gap-2">
+                    <span id="voiceStatusDot" class="w-3 h-3 rounded-full bg-slate-500"></span>
+                    <span id="voiceStatusText" class="text-xs text-slate-300 font-semibold">Voice Nonaktif</span>
+                </div>
+                
+                <div class="h-4 w-px bg-slate-700"></div>
+
+                <button id="btnInitMic" onclick="initAudioStream()" class="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-xs font-semibold rounded-full flex items-center gap-1.5 transition">
+                    <i class="fa-solid fa-microphone"></i>
+                    <span>Aktifkan Mic</span>
+                </button>
+
+                <button id="btnToggleMic" disabled onclick="toggleMic()" class="hidden px-3 py-1.5 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 text-xs font-semibold rounded-full flex items-center gap-1.5 transition">
+                    <i id="micIcon" class="fa-solid fa-microphone text-emerald-400"></i>
+                    <span id="micText">Mic On</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Container -->
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 flex flex-col lg:flex-row gap-6 items-start justify-center">
+
+        <!-- Left Column: Game Connection & Controls -->
+        <div class="w-full lg:w-80 flex flex-col gap-4 order-2 lg:order-1">
+            
+            <!-- Connection Card -->
+            <div class="bg-slate-800/60 backdrop-blur-md border border-slate-700/60 rounded-2xl p-5 shadow-xl">
+                <h2 class="font-semibold text-base mb-3 text-slate-200 flex items-center gap-2">
+                    <i class="fa-solid fa-network-wired text-indigo-400"></i> Koneksi Room Jarak Jauh
+                </h2>
+                
+                <div id="setupRoomArea" class="space-y-3">
+                    <div>
+                        <label class="block text-xs font-medium text-slate-400 mb-1">Nama Pemain</label>
+                        <input type="text" id="inputPlayerName" placeholder="Masukkan nama..." class="w-full bg-slate-900/90 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-purple-500 transition">
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2 pt-1">
+                        <button id="btnCreateRoom" onclick="createRoom()" class="w-full py-2.5 px-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-semibold text-xs rounded-xl shadow-lg shadow-purple-900/40 transition">
+                            <i class="fa-solid fa-plus-circle mr-1"></i> Buat Room
+                        </button>
+                        <button onclick="showJoinInput()" class="w-full py-2.5 px-3 bg-slate-700 hover:bg-slate-600 text-white font-semibold text-xs rounded-xl border border-slate-600 transition">
+                            <i class="fa-solid fa-right-to-bracket mr-1"></i> Gabung Room
+                        </button>
+                    </div>
+
+                    <div id="joinInputBox" class="hidden pt-2 space-y-2">
+                        <input type="text" id="inputRoomCode" placeholder="Masukkan Kode Room" class="w-full bg-slate-900 border border-purple-500/50 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none uppercase font-mono">
+                        <button id="btnConnect" onclick="joinRoom()" class="w-full py-2 bg-pink-600 hover:bg-pink-500 text-white font-semibold text-xs rounded-xl transition shadow-md flex items-center justify-center gap-1.5">
+                            <i class="fa-solid fa-plug"></i> Hubungkan Sekarang
+                        </button>
+                    </div>
+
+                    <div id="connectionFeedback" class="text-xs text-slate-400 italic pt-1 hidden"></div>
+                </div>
+
+                <!-- Active Connection Stats -->
+                <div id="connectedRoomArea" class="hidden space-y-3">
+                    <div class="bg-slate-900/80 p-3 rounded-xl border border-slate-700/80">
+                        <div class="text-xs text-slate-400">Kode Room Anda:</div>
+                        <div class="flex items-center justify-between mt-1">
+                            <span id="displayRoomCode" class="font-mono text-lg font-bold text-purple-400 tracking-wider">------</span>
+                            <button onclick="copyRoomCode()" class="text-xs bg-slate-800 hover:bg-slate-700 border border-slate-600 px-2.5 py-1 rounded-lg text-slate-300">
+                                <i class="fa-regular fa-copy"></i> Salin
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-between text-xs px-1">
+                        <span class="text-slate-400">Status Koneksi:</span>
+                        <span id="peerStatus" class="font-semibold text-amber-400">Menunggu Pemain 2...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Player Info & Status -->
+            <div class="bg-slate-800/60 backdrop-blur-md border border-slate-700/60 rounded-2xl p-5 shadow-xl space-y-4">
+                <h3 class="font-semibold text-base text-slate-200 flex items-center gap-2">
+                    <i class="fa-solid fa-users text-pink-400"></i> Daftar Pemain
+                </h3>
+
+                <div class="space-y-2.5">
+                    <!-- Player 1 -->
+                    <div id="p1Card" class="flex items-center justify-between p-3 rounded-xl bg-slate-900/70 border border-pink-500/30">
+                        <div class="flex items-center gap-3">
+                            <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-pink-500 to-rose-400 flex items-center justify-center font-bold text-white shadow-md">
+                                P1
+                            </div>
+                            <div>
+                                <div id="p1Name" class="font-semibold text-sm text-slate-200">Pemain 1</div>
+                                <div id="p1Pos" class="text-xs text-slate-400">Kotak: 1</div>
+                            </div>
+                        </div>
+                        <span id="p1Badge" class="text-xs px-2 py-0.5 rounded-full bg-pink-500/20 text-pink-300 border border-pink-500/30 font-medium">Anda</span>
+                    </div>
+
+                    <!-- Player 2 -->
+                    <div id="p2Card" class="flex items-center justify-between p-3 rounded-xl bg-slate-900/70 border border-cyan-500/30 opacity-70">
+                        <div class="flex items-center gap-3">
+                            <div class="w-8 h-8 rounded-full bg-gradient-to-tr from-cyan-500 to-blue-500 flex items-center justify-center font-bold text-white shadow-md">
+                                P2
+                            </div>
+                            <div>
+                                <div id="p2Name" class="font-semibold text-sm text-slate-200">Menunggu...</div>
+                                <div id="p2Pos" class="text-xs text-slate-400">Kotak: 1</div>
+                            </div>
+                        </div>
+                        <span id="p2Badge" class="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 font-medium">-</span>
+                    </div>
+                </div>
+
+                <!-- Dice Rolling & Turn Section -->
+                <div class="pt-2 border-t border-slate-700/60 flex flex-col items-center">
+                    <div id="turnIndicator" class="text-center text-sm font-bold text-yellow-400 mb-4 bg-yellow-500/10 border border-yellow-500/30 px-4 py-1.5 rounded-full w-full">
+                        Giliran: Pemain 1
+                    </div>
+
+                    <!-- Dice Display -->
+                    <div class="dice-box my-2">
+                        <div id="dice" class="dice">
+                            <div class="dice-face" style="transform: translateZ(30px)">
+                                <div></div><div></div><div></div><div></div><div class="dot"></div><div></div><div></div><div></div><div></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button id="btnRollDice" disabled onclick="rollDiceAction()" class="mt-4 w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 disabled:opacity-40 text-white font-bold text-sm rounded-xl shadow-lg shadow-emerald-900/40 transition transform active:scale-95 flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-dice text-lg"></i> Lempar Dadu
+                    </button>
+                </div>
+            </div>
+
+            <!-- Chat / Log Box -->
+            <div class="bg-slate-800/60 backdrop-blur-md border border-slate-700/60 rounded-2xl p-4 shadow-xl flex flex-col h-48">
+                <div class="font-semibold text-xs text-slate-400 mb-2 flex items-center gap-1.5">
+                    <i class="fa-solid fa-message"></i> Game Log & Chat
+                </div>
+                <div id="chatLogs" class="flex-1 overflow-y-auto space-y-1.5 text-xs pr-1">
+                    <div class="text-slate-400 italic">Selamat datang di Ular Tangga Truth or Dare!</div>
+                </div>
+                <div class="flex gap-2 mt-2 pt-2 border-t border-slate-700/50">
+                    <input type="text" id="chatInput" onkeydown="if(event.key==='Enter') sendChatMessage()" placeholder="Ketik pesan..." class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none">
+                    <button onclick="sendChatMessage()" class="bg-purple-600 hover:bg-purple-500 px-3 py-1.5 rounded-lg text-xs font-medium">Kirim</button>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Right Column: Interactive Board -->
+        <div class="w-full lg:flex-1 flex flex-col items-center order-1 lg:order-2">
+            
+            <div class="relative w-full flex justify-center items-center">
+                <!-- Board Grid -->
+                <div id="boardGrid" class="board-grid bg-slate-900 rounded-2xl overflow-hidden border-2 border-slate-700 shadow-2xl">
+                    <!-- Canvas layer for Snakes and Ladders -->
+                    <canvas id="boardCanvas"></canvas>
+                    
+                    <!-- Player Tokens -->
+                    <div id="p1Token" class="token w-7 h-7 rounded-full bg-gradient-to-tr from-pink-500 to-rose-400 border-2 border-white flex items-center justify-center font-bold text-xs text-white shadow-lg">P1</div>
+                    <div id="p2Token" class="token w-7 h-7 rounded-full bg-gradient-to-tr from-cyan-400 to-blue-600 border-2 border-white flex items-center justify-center font-bold text-xs text-white shadow-lg">P2</div>
+                </div>
+            </div>
+
+            <!-- Board Legend / Info -->
+            <div class="flex flex-wrap items-center justify-center gap-4 mt-4 text-xs text-slate-300 bg-slate-800/80 px-4 py-2 rounded-xl border border-slate-700">
+                <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-amber-500 inline-block"></span> Kotak Truth or Dare</span>
+                <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-emerald-500 inline-block"></span> Tangga Naiki</span>
+                <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-rose-500 inline-block"></span> Ular Turuni</span>
+            </div>
+
+        </div>
+
+    </main>
+
+    <!-- TRUTH OR DARE MODAL -->
+    <div id="todModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 z-50 hidden">
+        <div class="bg-slate-900 border-2 border-pink-500/50 rounded-3xl p-6 md:p-8 max-w-md w-full shadow-2xl relative text-center transform transition-all animate-bounce-short">
+            
+            <div class="w-16 h-16 bg-gradient-to-tr from-pink-500 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg shadow-pink-500/30">
+                <i class="fa-solid fa-masks-theater text-2xl text-white"></i>
+            </div>
+
+            <h3 class="text-xl font-bold bg-gradient-to-r from-pink-400 to-purple-300 bg-clip-text text-transparent mb-1">
+                KOTAK TANTANGAN!
+            </h3>
+            <p id="todPlayerTarget" class="text-xs text-slate-400 mb-6">Pemain hinggap di kotak Truth or Dare</p>
+
+            <!-- Selection Stage -->
+            <div id="todChoiceStage" class="space-y-3">
+                <p class="text-sm font-semibold text-slate-200">Pilih salah satu tantangan dibawah ini:</p>
+                <div class="grid grid-cols-2 gap-3 pt-2">
+                    <button onclick="pickChallenge('truth')" class="py-3 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold rounded-2xl shadow-lg transition transform hover:scale-105 flex flex-col items-center">
+                        <i class="fa-solid fa-question-circle text-xl mb-1"></i>
+                        <span>TRUTH</span>
+                        <span class="text-[10px] font-normal opacity-80">Jujur Kata</span>
+                    </button>
+                    <button onclick="pickChallenge('dare')" class="py-3 px-4 bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white font-bold rounded-2xl shadow-lg transition transform hover:scale-105 flex flex-col items-center">
+                        <i class="fa-solid fa-bolt text-xl mb-1"></i>
+                        <span>DARE</span>
+                        <span class="text-[10px] font-normal opacity-80">Tantangan</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Content Stage -->
+            <div id="todContentStage" class="hidden space-y-4">
+                <div class="p-4 bg-slate-800/80 border border-slate-700 rounded-2xl">
+                    <span id="todBadge" class="px-3 py-1 rounded-full text-xs font-bold tracking-wider uppercase mb-2 inline-block"></span>
+                    <p id="todText" class="text-base font-semibold text-slate-100 leading-relaxed mt-2">
+                        -- Soal Tantangan --
+                    </p>
+                </div>
+
+                <p class="text-xs text-slate-400 italic">Bicarakan / lakukan tantangan ini lewat mic suara secara langsung!</p>
+
+                <button onclick="closeTodModal()" class="w-full py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-bold rounded-xl shadow-lg transition">
+                    Selesai & Lanjutkan Permainan
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- WINNER MODAL -->
+    <div id="winModal" class="fixed inset-0 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4 z-50 hidden">
+        <div class="bg-slate-900 border-2 border-yellow-500/60 rounded-3xl p-8 max-w-sm w-full shadow-2xl text-center">
+            <div class="w-20 h-20 bg-gradient-to-tr from-yellow-400 to-amber-600 rounded-full flex items-center justify-center mx-auto mb-4 shadow-xl shadow-yellow-500/40">
+                <i class="fa-solid fa-trophy text-4xl text-slate-950"></i>
+            </div>
+            <h2 class="text-2xl font-bold text-yellow-400 mb-2">SELAMAT!</h2>
+            <p id="winPlayerName" class="text-lg font-semibold text-slate-200 mb-6">Pemain 1 Memenangkan Permainan!</p>
+            <button onclick="restartGame()" class="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-bold rounded-xl shadow-lg transition">
+                Main Lagi
+            </button>
+        </div>
+    </div>
+
+    <!-- Hidden Audio element for remote voice stream -->
+    <audio id="remoteAudio" autoplay></audio>
+
+    <script>
+        /* --- GAME CONFIGURATION & DATA --- */
+        const BOARD_SIZE = 100;
+        
+        // PeerJS ICE Configuration with Google STUN Servers
+        const PEER_CONFIG = {
+            debug: 1,
+            config: {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' }
+                ]
+            }
+        };
+
+        const snakes = { 99: 54, 70: 55, 52: 29, 36: 6, 25: 2 };
+        const ladders = { 4: 26, 13: 46, 33: 67, 42: 63, 62: 81, 74: 95 };
+        const todTiles = [7, 18, 28, 38, 49, 58, 68, 77, 85, 93];
+
+        const truthList = [
+            "Apa hal pertama yang membuatmu tertarik padaku/teman mainmu ini?",
+            "Ceritakan momen terlucu atau paling canggung saat kita pertama kali kenal!",
+            "Apa kebiasaan kecilku yang tanpa kusadari menurutmu sangat menggemaskan?",
+            "Jika kita bisa liburan bersama besok, kota/negara mana yang ingin kamu kunjungi bersamaku?",
+            "Apa lagu yang paling mengingatkanmu padaku?",
+            "Ceritakan mimpi paling aneh atau unik yang pernah kamu alami baru-baru ini!",
+            "Apa satu rahasia kecil atau keinginanmu yang belum pernah kamu ceritakan ke siapa pun?",
+            "Apa makanan favorit yang paling ingin kamu makan bareng aku sekarang?"
+        ];
+
+        const dareList = [
+            "Katakan kata-kata manis/pujian paling tulus selama 15 detik tanpa tertawa di mic!",
+            "Nyanyikan reff dari lagu favoritmu sekarang juga lewat voice call!",
+            "Tirukan suara hewan favoritmu atau karakter kartun lucu di voice chat!",
+            "Kirim foto selfie paling lucu/konyol kamu saat ini di chat room!",
+            "Bicaralah dengan gaya aksen/bahasa daerah pilihan lawan mainmu selama 2 putaran!",
+            "Puji lawan mainmu dengan 3 kata sifat indah secara berturut-turut di mic!",
+            "Buat gombalan lucu buatanmu sendiri secara instan di voice call!"
+        ];
+
+        /* --- STATE VARIABLES --- */
+        let myRole = null; // 'p1' (Host) or 'p2' (Guest)
+        let myName = "Pemain 1";
+        let peer = null;
+        let conn = null;
+        let mediaCall = null;
+        let connectionTimeoutTimer = null;
+
+        let localStream = null;
+        let isMicMuted = false;
+
+        let gameState = {
+            p1Pos: 1,
+            p2Pos: 1,
+            turn: 'p1',
+            p1Name: 'Pemain 1',
+            p2Name: 'Pemain 2',
+            isFinished: false
+        };
+
+        const p1Token = document.getElementById('p1Token');
+        const p2Token = document.getElementById('p2Token');
+        const boardCanvas = document.getElementById('boardCanvas');
+        const ctx = boardCanvas.getContext('2d');
+
+        /* --- INITIALIZATION --- */
+        window.onload = () => {
+            buildBoardUI();
+            setupCanvasSize();
+            drawSnakesAndLadders();
+            updatePositionsUI();
+            
+            window.addEventListener('resize', () => {
+                setupCanvasSize();
+                drawSnakesAndLadders();
+                updatePositionsUI();
+            });
+        };
+
+        function setFeedback(msg, isError = false) {
+            const fb = document.getElementById('connectionFeedback');
+            fb.classList.remove('hidden');
+            fb.textContent = msg;
+            fb.className = `text-xs pt-1 ${isError ? 'text-red-400 font-semibold' : 'text-purple-300'}`;
+        }
+
+        /* --- OPTIMIZED PEERJS & MULTIPLAYER LOGIC --- */
+        function createRoom() {
+            const inputName = document.getElementById('inputPlayerName').value.trim();
+            if (!inputName) {
+                alert("Silakan masukkan nama Anda terlebih dahulu!");
+                return;
+            }
+            myName = inputName;
+            myRole = 'p1';
+            gameState.p1Name = myName;
+
+            const btnCreate = document.getElementById('btnCreateRoom');
+            btnCreate.disabled = true;
+            btnCreate.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Memproses...`;
+            setFeedback("Menghubungkan ke jaringan...");
+
+            if (peer) peer.destroy();
+
+            // Instant auto-generated Peer ID without manual custom ID locking delay
+            peer = new Peer(PEER_CONFIG);
+
+            clearTimeout(connectionTimeoutTimer);
+            connectionTimeoutTimer = setTimeout(() => {
+                if (!peer || !peer.id) {
+                    btnCreate.disabled = false;
+                    btnCreate.innerHTML = `<i class="fa-solid fa-plus-circle mr-1"></i> Buat Room`;
+                    setFeedback("Koneksi lambat. Silakan klik 'Buat Room' lagi.", true);
+                }
+            }, 8000);
+
+            peer.on('open', (id) => {
+                clearTimeout(connectionTimeoutTimer);
+                document.getElementById('setupRoomArea').classList.add('hidden');
+                document.getElementById('connectedRoomArea').classList.remove('hidden');
+                document.getElementById('displayRoomCode').textContent = id;
+                document.getElementById('p1Name').textContent = myName + " (Host)";
+                
+                logMessage(`Room instan siap! Kode Room: ${id}`);
+            });
+
+            peer.on('connection', (connection) => {
+                conn = connection;
+                setupDataConnection();
+            });
+
+            peer.on('call', (call) => {
+                mediaCall = call;
+                call.answer(localStream || undefined);
+                call.on('stream', handleRemoteStream);
+            });
+
+            peer.on('error', (err) => {
+                clearTimeout(connectionTimeoutTimer);
+                console.error("PeerJS Error:", err);
+                btnCreate.disabled = false;
+                btnCreate.innerHTML = `<i class="fa-solid fa-plus-circle mr-1"></i> Buat Room`;
+                setFeedback("Gagal membuat room. Coba beberapa saat lagi.", true);
+            });
+        }
+
+        function showJoinInput() {
+            document.getElementById('joinInputBox').classList.toggle('hidden');
+        }
+
+        function joinRoom() {
+            const inputName = document.getElementById('inputPlayerName').value.trim();
+            let roomCode = document.getElementById('inputRoomCode').value.trim();
+
+            if (!inputName || !roomCode) {
+                alert("Isi nama dan kode room terlebih dahulu!");
+                return;
+            }
+
+            myName = inputName;
+            myRole = 'p2';
+            gameState.p2Name = myName;
+
+            const btnConnect = document.getElementById('btnConnect');
+            btnConnect.disabled = true;
+            btnConnect.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Membuka Koneksi...`;
+            setFeedback("Menghubungkan ke room " + roomCode + "...");
+
+            if (peer) peer.destroy();
+            peer = new Peer(PEER_CONFIG);
+
+            clearTimeout(connectionTimeoutTimer);
+            connectionTimeoutTimer = setTimeout(() => {
+                btnConnect.disabled = false;
+                btnConnect.innerHTML = `<i class="fa-solid fa-plug"></i> Hubungkan Sekarang`;
+                setFeedback("Gagal terhubung dalam 10 detik. Pastikan Kode Room benar.", true);
+            }, 10000);
+
+            peer.on('open', (id) => {
+                conn = peer.connect(roomCode, { reliable: true });
+                setupDataConnection();
+
+                if (localStream) {
+                    mediaCall = peer.call(roomCode, localStream);
+                    if (mediaCall) {
+                        mediaCall.on('stream', handleRemoteStream);
+                    }
+                }
+            });
+
+            peer.on('error', (err) => {
+                clearTimeout(connectionTimeoutTimer);
+                console.error("PeerJS Join Error:", err);
+                btnConnect.disabled = false;
+                btnConnect.innerHTML = `<i class="fa-solid fa-plug"></i> Hubungkan Sekarang`;
+                setFeedback("Koneksi gagal. Periksa kembali Kode Room.", true);
+            });
+        }
+
+        function setupDataConnection() {
+            if (!conn) return;
+
+            conn.on('open', () => {
+                clearTimeout(connectionTimeoutTimer);
+                document.getElementById('setupRoomArea').classList.add('hidden');
+                document.getElementById('connectedRoomArea').classList.remove('hidden');
+                document.getElementById('peerStatus').textContent = "Terhubung!";
+                document.getElementById('peerStatus').className = "font-semibold text-emerald-400";
+                
+                if (myRole === 'p2') {
+                    document.getElementById('p2Name').textContent = myName + " (Anda)";
+                    document.getElementById('p2Badge').textContent = "Anda";
+                    document.getElementById('displayRoomCode').textContent = conn.peer;
+                    sendData({ type: 'JOIN_NAME', name: myName });
+                } else {
+                    sendData({ type: 'SYNC_STATE', state: gameState });
+                    updateGameUI();
+                }
+
+                logMessage("Sistem: Berhasil terhubung dengan lawan main!");
+            });
+
+            conn.on('data', (data) => {
+                handleIncomingData(data);
+            });
+
+            conn.on('close', () => {
+                logMessage("Koneksi terputus dari pemain lain.");
+                document.getElementById('peerStatus').textContent = "Terputus";
+                document.getElementById('peerStatus').className = "font-semibold text-red-400";
+            });
+        }
+
+        function sendData(data) {
+            if (conn && conn.open) {
+                conn.send(data);
+            }
+        }
+
+        function handleIncomingData(data) {
+            switch (data.type) {
+                case 'JOIN_NAME':
+                    gameState.p2Name = data.name;
+                    document.getElementById('p2Name').textContent = data.name;
+                    document.getElementById('p2Card').classList.remove('opacity-70');
+                    sendData({ type: 'SYNC_STATE', state: gameState });
+                    updateGameUI();
+                    logMessage(`${data.name} bergabung ke permainan!`);
+                    
+                    // Call guest back if local stream exists
+                    if (localStream && conn && conn.peer) {
+                        mediaCall = peer.call(conn.peer, localStream);
+                        if (mediaCall) mediaCall.on('stream', handleRemoteStream);
+                    }
+                    break;
+
+                case 'SYNC_STATE':
+                    gameState = data.state;
+                    document.getElementById('p1Name').textContent = gameState.p1Name;
+                    document.getElementById('p2Name').textContent = gameState.p2Name;
+                    document.getElementById('p2Card').classList.remove('opacity-70');
+                    updateGameUI();
+                    break;
+
+                case 'ROLL_RESULT':
+                    animateDiceRoll(data.diceValue, () => {
+                        processMove(data.role, data.diceValue);
+                    });
+                    break;
+
+                case 'CHAT_MSG':
+                    logMessage(`${data.sender}: ${data.msg}`);
+                    break;
+
+                case 'TOD_PICK':
+                    displayTodChallenge(data.category);
+                    break;
+
+                case 'TOD_CLOSE':
+                    document.getElementById('todModal').classList.add('hidden');
+                    switchTurn();
+                    break;
+            }
+        }
+
+        /* --- WEBRTC AUDIO CHAT --- */
+        async function initAudioStream() {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                
+                document.getElementById('btnInitMic').classList.add('hidden');
+                const btnToggle = document.getElementById('btnToggleMic');
+                btnToggle.classList.remove('hidden');
+                btnToggle.disabled = false;
+
+                document.getElementById('voiceStatusDot').className = "w-3 h-3 rounded-full bg-emerald-500 animate-pulse";
+                document.getElementById('voiceStatusText').textContent = "Voice On";
+                
+                logMessage("Mikrofon berhasil diaktifkan.");
+
+                // If peer connection already exists, place audio call
+                if (peer && conn && conn.peer) {
+                    mediaCall = peer.call(conn.peer, localStream);
+                    if (mediaCall) mediaCall.on('stream', handleRemoteStream);
+                }
+            } catch (err) {
+                console.warn("Akses Mikrofon ditolak atau tidak tersedia:", err);
+                alert("Gagal mengaktifkan mikrofon. Pastikan izin mikrofon diberikan di browser Anda.");
+            }
+        }
+
+        function handleRemoteStream(remoteStream) {
+            const remoteAudio = document.getElementById('remoteAudio');
+            remoteAudio.srcObject = remoteStream;
+            remoteAudio.play().catch(e => console.warn("Audio autoplay blocked:", e));
+            logMessage("Suara lawan main terhubung (Live Call Active).");
+        }
+
+        function toggleMic() {
+            if (!localStream) return;
+            isMicMuted = !isMicMuted;
+            localStream.getAudioTracks()[0].enabled = !isMicMuted;
+
+            const micIcon = document.getElementById('micIcon');
+            const micText = document.getElementById('micText');
+
+            if (isMicMuted) {
+                micIcon.className = "fa-solid fa-microphone-slash text-red-400";
+                micText.textContent = "Mute";
+            } else {
+                micIcon.className = "fa-solid fa-microphone text-emerald-400";
+                micText.textContent = "Mic On";
+            }
+        }
+
+        /* --- BOARD UI & CANVAS DRAWING --- */
+        function buildBoardUI() {
+            const grid = document.getElementById('boardGrid');
+            grid.innerHTML = '';
+            grid.appendChild(boardCanvas);
+            grid.appendChild(p1Token);
+            grid.appendChild(p2Token);
+
+            for (let r = 9; r >= 0; r--) {
+                const isEvenRow = (r % 2 === 0);
+                for (let c = 0; c < 10; c++) {
+                    const col = isEvenRow ? c : (9 - c);
+                    const tileNum = r * 10 + col + 1;
+
+                    const cell = document.createElement('div');
+                    cell.id = `tile-${tileNum}`;
+                    cell.className = `board-cell ${((r + c) % 2 === 0) ? 'bg-slate-800/80' : 'bg-slate-800/40'} text-slate-400`;
+
+                    const label = document.createElement('span');
+                    label.textContent = tileNum;
+                    cell.appendChild(label);
+
+                    if (todTiles.includes(tileNum)) {
+                        cell.classList.add('bg-amber-500/20', 'border-amber-500/40');
+                        const todTag = document.createElement('span');
+                        todTag.className = 'absolute bottom-1 right-1 text-[10px] bg-amber-500/90 text-slate-950 font-black px-1 rounded';
+                        todTag.textContent = 'ToD';
+                        cell.appendChild(todTag);
+                    }
+
+                    grid.appendChild(cell);
+                }
+            }
+        }
+
+        function setupCanvasSize() {
+            const grid = document.getElementById('boardGrid');
+            boardCanvas.width = grid.clientWidth;
+            boardCanvas.height = grid.clientHeight;
+        }
+
+        function getTileCenter(tileNum) {
+            const grid = document.getElementById('boardGrid');
+            const rect = grid.getBoundingClientRect();
+            const tile = document.getElementById(`tile-${tileNum}`);
+            if (!tile) return { x: 0, y: 0 };
+            
+            const tileRect = tile.getBoundingClientRect();
+            return {
+                x: (tileRect.left - rect.left) + tileRect.width / 2,
+                y: (tileRect.top - rect.top) + tileRect.height / 2
+            };
+        }
+
+        function drawSnakesAndLadders() {
+            ctx.clearRect(0, 0, boardCanvas.width, boardCanvas.height);
+
+            for (let bottom in ladders) {
+                const start = getTileCenter(parseInt(bottom));
+                const end = getTileCenter(ladders[bottom]);
+                drawLadder(start, end);
+            }
+
+            for (let head in snakes) {
+                const start = getTileCenter(parseInt(head));
+                const end = getTileCenter(snakes[head]);
+                drawSnake(start, end);
+            }
+        }
+
+        function drawLadder(start, end) {
+            ctx.save();
+            ctx.strokeStyle = '#10b981';
+            ctx.lineWidth = 6;
+            ctx.lineCap = 'round';
+
+            const dx = end.x - start.x;
+            const dy = end.y - start.y;
+            const angle = Math.atan2(dy, dx);
+            const offsetX = Math.sin(angle) * 8;
+            const offsetY = -Math.cos(angle) * 8;
+
+            ctx.beginPath();
+            ctx.moveTo(start.x + offsetX, start.y + offsetY);
+            ctx.lineTo(end.x + offsetX, end.y + offsetY);
+            ctx.moveTo(start.x - offsetX, start.y - offsetY);
+            ctx.lineTo(end.x - offsetX, end.y - offsetY);
+            ctx.stroke();
+
+            ctx.strokeStyle = '#34d399';
+            ctx.lineWidth = 3;
+            const steps = 6;
+            for (let i = 1; i < steps; i++) {
+                const px = start.x + (dx * (i / steps));
+                const py = start.y + (dy * (i / steps));
+                ctx.beginPath();
+                ctx.moveTo(px + offsetX, py + offsetY);
+                ctx.lineTo(px - offsetX, py - offsetY);
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+
+        function drawSnake(start, end) {
+            ctx.save();
+            ctx.strokeStyle = '#f43f5e';
+            ctx.lineWidth = 7;
+            ctx.lineCap = 'round';
+
+            const midX = (start.x + end.x) / 2 + 25;
+            const midY = (start.y + end.y) / 2;
+
+            ctx.beginPath();
+            ctx.moveTo(start.x, start.y);
+            ctx.quadraticCurveTo(midX, midY, end.x, end.y);
+            ctx.stroke();
+
+            ctx.fillStyle = '#e11d48';
+            ctx.beginPath();
+            ctx.arc(start.x, start.y, 8, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        /* --- GAMEPLAY LOGIC --- */
+        function rollDiceAction() {
+            if (gameState.turn !== myRole || gameState.isFinished) return;
+
+            const diceValue = Math.floor(Math.random() * 6) + 1;
+            
+            sendData({ type: 'ROLL_RESULT', role: myRole, diceValue: diceValue });
+
+            animateDiceRoll(diceValue, () => {
+                processMove(myRole, diceValue);
+            });
+        }
+
+        function animateDiceRoll(targetVal, callback) {
+            const dice = document.getElementById('dice');
+            const randomRotateX = 720 + (Math.floor(Math.random() * 4) * 90);
+            const randomRotateY = 720 + (Math.floor(Math.random() * 4) * 90);
+            
+            dice.style.transform = `rotateX(${randomRotateX}deg) rotateY(${randomRotateY}deg)`;
+            
+            setTimeout(() => {
+                dice.style.transform = `rotateX(0deg) rotateY(0deg)`;
+                callback();
+            }, 800);
+        }
+
+        function processMove(playerRole, steps) {
+            const currentPosKey = playerRole === 'p1' ? 'p1Pos' : 'p2Pos';
+            let oldPos = gameState[currentPosKey];
+            let newPos = oldPos + steps;
+
+            if (newPos > BOARD_SIZE) {
+                newPos = BOARD_SIZE - (newPos - BOARD_SIZE);
+            }
+
+            gameState[currentPosKey] = newPos;
+            const playerName = playerRole === 'p1' ? gameState.p1Name : gameState.p2Name;
+            logMessage(`${playerName} melempar dadu ${steps} ➔ Kotak ${newPos}`);
+
+            updatePositionsUI();
+
+            setTimeout(() => {
+                if (ladders[newPos]) {
+                    const destination = ladders[newPos];
+                    logMessage(`🚀 ${playerName} naik Tangga! Ke kotak ${destination}`);
+                    gameState[currentPosKey] = destination;
+                    updatePositionsUI();
+                    newPos = destination;
+                } else if (snakes[newPos]) {
+                    const destination = snakes[newPos];
+                    logMessage(`🐍 ${playerName} kena Ular! Turun ke kotak ${destination}`);
+                    gameState[currentPosKey] = destination;
+                    updatePositionsUI();
+                    newPos = destination;
+                }
+
+                if (newPos === BOARD_SIZE) {
+                    gameState.isFinished = true;
+                    showWinner(playerName);
+                    return;
+                }
+
+                if (todTiles.includes(newPos)) {
+                    triggerTodModal(playerName);
+                } else {
+                    switchTurn();
+                }
+            }, 600);
+        }
+
+        function switchTurn() {
+            gameState.turn = gameState.turn === 'p1' ? 'p2' : 'p1';
+            updateGameUI();
+        }
+
+        function updatePositionsUI() {
+            const p1Coords = getTileCenter(gameState.p1Pos);
+            const p2Coords = getTileCenter(gameState.p2Pos);
+
+            const isSameCell = gameState.p1Pos === gameState.p2Pos;
+            const offsetP1 = isSameCell ? -10 : 0;
+            const offsetP2 = isSameCell ? 10 : 0;
+
+            p1Token.style.left = `${p1Coords.x + offsetP1 - 14}px`;
+            p1Token.style.top = `${p1Coords.y - 14}px`;
+
+            p2Token.style.left = `${p2Coords.x + offsetP2 - 14}px`;
+            p2Token.style.top = `${p2Coords.y - 14}px`;
+
+            document.getElementById('p1Pos').textContent = `Kotak: ${gameState.p1Pos}`;
+            document.getElementById('p2Pos').textContent = `Kotak: ${gameState.p2Pos}`;
+        }
+
+        function updateGameUI() {
+            updatePositionsUI();
+
+            const isMyTurn = (gameState.turn === myRole);
+            const btnRoll = document.getElementById('btnRollDice');
+            const turnIndicator = document.getElementById('turnIndicator');
+
+            btnRoll.disabled = !isMyTurn || gameState.isFinished;
+
+            const activeName = gameState.turn === 'p1' ? gameState.p1Name : gameState.p2Name;
+            turnIndicator.textContent = isMyTurn ? "🎯 GILIRAN ANDA!" : `Giliran: ${activeName}`;
+            
+            if (isMyTurn) {
+                turnIndicator.className = "text-center text-sm font-bold text-pink-400 bg-pink-500/20 border border-pink-500/40 px-4 py-1.5 rounded-full w-full animate-pulse";
+            } else {
+                turnIndicator.className = "text-center text-sm font-bold text-yellow-400 bg-yellow-500/10 border border-yellow-500/30 px-4 py-1.5 rounded-full w-full";
+            }
+        }
+
+        /* --- TRUTH OR DARE MODAL HANDLERS --- */
+        function triggerTodModal(playerName) {
+            document.getElementById('todPlayerTarget').textContent = `${playerName} hinggap di kotak Truth or Dare!`;
+            document.getElementById('todChoiceStage').classList.remove('hidden');
+            document.getElementById('todContentStage').classList.add('hidden');
+            document.getElementById('todModal').classList.remove('hidden');
+        }
+
+        function pickChallenge(category) {
+            if (gameState.turn !== myRole) return;
+
+            sendData({ type: 'TOD_PICK', category: category });
+            displayTodChallenge(category);
+        }
+
+        function displayTodChallenge(category) {
+            document.getElementById('todChoiceStage').classList.add('hidden');
+            document.getElementById('todContentStage').classList.remove('hidden');
+
+            const todBadge = document.getElementById('todBadge');
+            const todText = document.getElementById('todText');
+
+            if (category === 'truth') {
+                todBadge.className = "px-3 py-1 rounded-full text-xs font-bold tracking-wider uppercase mb-2 inline-block bg-blue-500/20 text-blue-300 border border-blue-500/40";
+                todBadge.textContent = "TRUTH (Jujur)";
+                const randomQ = truthList[Math.floor(Math.random() * truthList.length)];
+                todText.textContent = `"${randomQ}"`;
+            } else {
+                todBadge.className = "px-3 py-1 rounded-full text-xs font-bold tracking-wider uppercase mb-2 inline-block bg-rose-500/20 text-rose-300 border border-rose-500/40";
+                todBadge.textContent = "DARE (Tantangan)";
+                const randomD = dareList[Math.floor(Math.random() * dareList.length)];
+                todText.textContent = `"${randomD}"`;
+            }
+        }
+
+        function closeTodModal() {
+            document.getElementById('todModal').classList.add('hidden');
+            sendData({ type: 'TOD_CLOSE' });
+            switchTurn();
+        }
+
+        /* --- WINNER & CHAT HELPERS --- */
+        function showWinner(playerName) {
+            document.getElementById('winPlayerName').textContent = `🏆 ${playerName} Memenangkan Permainan!`;
+            document.getElementById('winModal').classList.remove('hidden');
+            confetti({ particleCount: 150, spread: 80, origin: { y: 0.6 } });
+        }
+
+        function restartGame() {
+            gameState.p1Pos = 1;
+            gameState.p2Pos = 1;
+            gameState.turn = 'p1';
+            gameState.isFinished = false;
+
+            document.getElementById('winModal').classList.add('hidden');
+            if (myRole === 'p1') {
+                sendData({ type: 'SYNC_STATE', state: gameState });
+            }
+            updateGameUI();
+        }
+
+        function logMessage(text) {
+            const logs = document.getElementById('chatLogs');
+            const item = document.createElement('div');
+            item.className = 'text-slate-300 bg-slate-900/60 px-2 py-1 rounded border border-slate-800';
+            item.textContent = text;
+            logs.appendChild(item);
+            logs.scrollTop = logs.scrollHeight;
+        }
+
+        function sendChatMessage() {
+            const input = document.getElementById('chatInput');
+            const msg = input.value.trim();
+            if (!msg) return;
+
+            logMessage(`Anda: ${msg}`);
+            sendData({ type: 'CHAT_MSG', sender: myName, msg: msg });
+            input.value = '';
+        }
+
+        function copyRoomCode() {
+            const code = document.getElementById('displayRoomCode').textContent;
+            navigator.clipboard.writeText(code).then(() => {
+                alert("Kode Room berhasil disalin: " + code);
+            });
+        }
+    </script>
+</body>
+</html>
+```
